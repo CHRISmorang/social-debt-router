@@ -10,7 +10,17 @@
 
     <div class="max-w-5xl mx-auto bg-white p-8 rounded-xl shadow-md">
         <h1 class="text-3xl font-bold text-gray-900 mb-2 text-center">🤝 Preferred-Path Debt Settler</h1>
-        <p class="text-gray-600 text-center mb-8">Settle group expenses safely by routing payments only through trusted friends.</p>
+        <p class="text-gray-600 text-center mb-6">Settle group expenses safely by routing payments only through trusted friends.</p>
+
+        <div class="flex justify-center gap-4 mb-8 bg-gray-50 p-3 rounded-lg border border-gray-200">
+            <button onclick="exportConfig()" class="bg-gray-700 hover:bg-gray-800 text-white text-sm font-medium px-4 py-2 rounded-lg transition shadow-sm">
+                📤 Export Config (JSON)
+            </button>
+            <label class="bg-gray-700 hover:bg-gray-800 text-white text-sm font-medium px-4 py-2 rounded-lg transition shadow-sm cursor-pointer">
+                📥 Import Config
+                <input type="file" id="importFile" accept=".json" onchange="importConfig(event)" class="hidden">
+            </label>
+        </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
             <div class="space-y-6">
@@ -64,7 +74,6 @@
 
         function removePerson(name) {
             delete group[name];
-            // Remove from other people's preferences
             for (let person in group) {
                 group[person].preferences = group[person].preferences.filter(p => p !== name);
             }
@@ -88,6 +97,41 @@
                 group[person].preferences.push(friend);
             }
             renderGroup();
+        }
+
+        // JSON Config Management
+        function exportConfig() {
+            if (Object.keys(group).length === 0) return alert("Nothing to export yet!");
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(group, null, 2));
+            const downloadAnchor = document.createElement('a');
+            downloadAnchor.setAttribute("href", dataStr);
+            downloadAnchor.setAttribute("download", "debt_settler_config.json");
+            document.body.appendChild(downloadAnchor);
+            downloadAnchor.click();
+            downloadAnchor.remove();
+        }
+
+        function importConfig(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const parsed = JSON.parse(e.target.result);
+                    if (typeof parsed === 'object' && parsed !== null) {
+                        group = parsed;
+                        renderGroup();
+                        document.getElementById('resultsArea').innerHTML = '<p class="text-gray-500 italic">Config imported successfully! Click calculate to view steps...</p>';
+                    } else {
+                        alert("Invalid file format.");
+                    }
+                } catch (err) {
+                    alert("Error reading JSON config file.");
+                }
+            };
+            reader.readAsText(file);
+            event.target.value = ''; // Reset file input element
         }
 
         function renderGroup() {
@@ -132,9 +176,8 @@
             }).join('');
         }
 
-        // BFS Routing Algorithm
+        // BFS Routing Algorithm with Aggregated Output Map
         function calculateSettlements() {
-            // Validation: Ensure everyone has at least 1 preference if there are other people available
             const names = Object.keys(group);
             if (names.length < 2) return alert("Please add at least 2 people to compute balances.");
             
@@ -144,24 +187,22 @@
                 }
             }
 
-            // Clone balances for computation
             let balances = {};
             for (let name in group) balances[name] = round2(group[name].balance);
 
-            // Build bidirectional graph framework based on preferences
             let graph = {};
             for (let name in group) graph[name] = new Set();
 
             for (let name in group) {
                 for (let friend of group[name].preferences) {
                     if (graph[name]) graph[name].add(friend);
-                    if (graph[friend]) graph[friend].add(name); // Bidirectional transaction channels
+                    if (graph[friend]) graph[friend].add(name);
                 }
             }
 
-            let transactions = [];
+            // Raw structural array for processing individual loops
+            let rawTransactions = [];
 
-            // Shortest path to any available creditor via BFS
             function findPathToCreditor(startDebtor) {
                 let queue = [[startDebtor]];
                 let visited = new Set([startDebtor]);
@@ -184,10 +225,8 @@
                 return null;
             }
 
-            // Loop and clear out debtors
             let debtors = Object.keys(balances).filter(n => balances[n] < -0.01);
             
-            // Check if total balances mathematically balance out to near zero
             let totalSum = Object.values(balances).reduce((a,b)=> a+b, 0);
             if (Math.abs(totalSum) > 2) {
                 alert(`Warning: Your total balances do not equal 0 (Sum is currently ${round2(totalSum)}). The algorithm will balance what it can.`);
@@ -197,11 +236,10 @@
                 while (balances[debtor] < -0.01) {
                     let path = findPathToCreditor(debtor);
 
-                    // If preferences cannot link them to a creditor, break out to a global fallback safety matching
                     if (!path) {
                         let outstandingCreditors = Object.keys(balances).filter(n => balances[n] > 0.01);
                         if (outstandingCreditors.length === 0) break;
-                        path = [debtor, outstandingCreditors[0]]; // Fallback forced route if graph isolated
+                        path = [debtor, outstandingCreditors[0]];
                     }
 
                     let creditor = path[path.length - 1];
@@ -210,9 +248,8 @@
 
                     if (amount <= 0) break;
 
-                    // Apply transaction chain
                     for (let i = 0; i < path.length - 1; i++) {
-                        transactions.push({ from: path[i], to: path[i+1], amount: amount });
+                        rawTransactions.push({ from: path[i], to: path[i+1], amount: amount });
                     }
 
                     balances[debtor] += amount;
@@ -220,7 +257,22 @@
                 }
             }
 
-            renderResults(transactions);
+            // --- CRITICAL FIX: AGGREGATE REPETITIVE TRANSACTIONS ---
+            let aggregatedMap = {};
+            
+            rawTransactions.forEach(t => {
+                let key = `${t.from}->${t.to}`;
+                if (aggregatedMap[key]) {
+                    aggregatedMap[key].amount += t.amount;
+                } else {
+                    aggregatedMap[key] = { from: t.from, to: t.to, amount: t.amount };
+                }
+            });
+
+            // Convert map values back to a sorted list
+            let finalTransactions = Object.values(aggregatedMap).filter(t => t.amount > 0.01);
+
+            renderResults(finalTransactions);
         }
 
         function round2(num) {
@@ -239,12 +291,12 @@
 
             container.innerHTML = transactions.map(t => `
                 <div class="bg-white p-3 rounded-lg border border-gray-200 shadow-sm flex items-center justify-between">
-                    <span class="font-medium text-gray-700">${t.from}</span>
+                    <span class="font-medium text-gray-700 w-24 truncate">${t.from}</span>
                     <div class="flex flex-col items-center flex-1 mx-2">
-                        <span class="text-xs text-indigo-600 font-bold bg-indigo-50 px-2 py-0.5 rounded-full">Pays $${t.amount.toFixed(2)}</span>
+                        <span class="text-xs text-indigo-600 font-bold bg-indigo-50 px-3 py-1 rounded-full">Pays $${round2(t.amount).toFixed(2)}</span>
                         <span class="text-gray-400 text-sm">➔</span>
                     </div>
-                    <span class="font-medium text-gray-700">${t.to}</span>
+                    <span class="font-medium text-gray-700 w-24 text-right truncate">${t.to}</span>
                 </div>
             `).join('');
         }
