@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Preferred-Path Debt Settler</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans p-6">
+
+    <div class="max-w-5xl mx-auto bg-white p-8 rounded-xl shadow-md">
+        <h1 class="text-3xl font-bold text-gray-900 mb-2 text-center">🤝 Preferred-Path Debt Settler</h1>
+        <p class="text-gray-600 text-center mb-8">Settle group expenses safely by routing payments only through trusted friends.</p>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div class="space-y-6">
+                <div>
+                    <h2 class="text-xl font-semibold mb-4 text-gray-700">1. Add/Manage Group (Max 15)</h2>
+                    <div class="flex gap-2 mb-4">
+                        <input type="text" id="nameInput" placeholder="Enter name (e.g., Bonani)" class="flex-1 border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <button onclick="addPerson()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-4 py-2 rounded-lg transition">Add</button>
+                    </div>
+                </div>
+
+                <div>
+                    <h2 class="text-xl font-semibold mb-4 text-gray-700">2. Balances & Preferences (1-5 friends)</h2>
+                    <div id="peopleList" class="space-y-4 max-h-[500px] overflow-y-auto pr-2">
+                        <p class="text-gray-400 italic">No members added yet.</p>
+                    </div>
+                </div>
+                
+                <button onclick="calculateSettlements()" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-lg shadow transition">
+                    🚀 Calculate Optimized Settlements
+                </button>
+            </div>
+
+            <div class="bg-gray-100 p-6 rounded-xl border border-gray-200 flex flex-col h-[650px]">
+                <h2 class="text-xl font-semibold mb-4 text-gray-700">3. Optimized Transaction Plan</h2>
+                <div id="resultsArea" class="flex-1 overflow-y-auto space-y-3 pr-2">
+                    <p class="text-gray-500 italic">Click calculate to view peer-to-peer routing steps...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Data State
+        let group = {}; // Structure: { Name: { balance: 0, preferences: [] } }
+        const MAX_PEOPLE = 15;
+        const MAX_PREFS = 5;
+
+        function addPerson() {
+            const input = document.getElementById('nameInput');
+            const name = input.value.trim();
+
+            if (!name) return;
+            if (group[name]) return alert("This name already exists!");
+            if (Object.keys(group).length >= MAX_PEOPLE) return alert(`Maximum limit of ${MAX_PEOPLE} people reached.`);
+
+            group[name] = { balance: 0, preferences: [] };
+            input.value = "";
+            renderGroup();
+        }
+
+        function removePerson(name) {
+            delete group[name];
+            // Remove from other people's preferences
+            for (let person in group) {
+                group[person].preferences = group[person].preferences.filter(p => p !== name);
+            }
+            renderGroup();
+        }
+
+        function updateBalance(name, val) {
+            group[name].balance = parseFloat(val) || 0;
+        }
+
+        function togglePreference(person, friend) {
+            let prefs = group[person].preferences;
+            if (prefs.includes(friend)) {
+                group[person].preferences = prefs.filter(p => p !== friend);
+            } else {
+                if (prefs.length >= MAX_PREFS) {
+                    alert(`You can select a maximum of ${MAX_PREFS} preferences.`);
+                    renderGroup();
+                    return;
+                }
+                group[person].preferences.push(friend);
+            }
+            renderGroup();
+        }
+
+        function renderGroup() {
+            const listContainer = document.getElementById('peopleList');
+            const names = Object.keys(group);
+
+            if (names.length === 0) {
+                listContainer.innerHTML = '<p class="text-gray-400 italic">No members added yet.</p>';
+                return;
+            }
+
+            listContainer.innerHTML = names.map(name => {
+                const availableFriends = names.filter(n => n !== name);
+                
+                let checkBoxesHtml = availableFriends.map(friend => {
+                    const isChecked = group[name].preferences.includes(friend) ? 'checked' : '';
+                    return `
+                        <label class="inline-flex items-center gap-1 bg-white border border-gray-200 px-2 py-1 rounded text-xs cursor-pointer hover:bg-gray-50">
+                            <input type="checkbox" ${isChecked} onchange="togglePreference('${name}', '${friend}')" class="rounded text-indigo-600 focus:ring-indigo-500">
+                            <span>${friend}</span>
+                        </label>
+                    `;
+                }).join('');
+
+                return `
+                    <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 relative">
+                        <button onclick="removePerson('${name}')" class="absolute top-2 right-2 text-gray-400 hover:text-red-500 text-sm">✕</button>
+                        <div class="flex items-center gap-4 mb-2">
+                            <span class="font-bold text-gray-800 w-24 truncate">${name}</span>
+                            <div class="flex items-center gap-1">
+                                <span class="text-sm text-gray-500">Balance:</span>
+                                <input type="number" step="0.01" value="${group[name].balance}" onchange="updateBalance('${name}', this.value)" 
+                                    class="w-28 border border-gray-300 rounded px-2 py-0.5 text-sm font-medium ${group[name].balance < 0 ? 'text-red-600 font-semibold' : group[name].balance > 0 ? 'text-emerald-600 font-semibold' : ''}">
+                            </div>
+                        </div>
+                        <div class="mt-2">
+                            <span class="text-xs text-gray-500 block mb-1">Trusted Friends (Selected: ${group[name].preferences.length}/${MAX_PREFS}):</span>
+                            <div class="flex flex-wrap gap-1">${checkBoxesHtml || '<span class="text-xs text-gray-400 italic">Add more group members to select friends</span>'}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // BFS Routing Algorithm
+        function calculateSettlements() {
+            // Validation: Ensure everyone has at least 1 preference if there are other people available
+            const names = Object.keys(group);
+            if (names.length < 2) return alert("Please add at least 2 people to compute balances.");
+            
+            for (let name of names) {
+                if (group[name].preferences.length === 0) {
+                    return alert(`Please select at least 1 trusted friend for ${name}.`);
+                }
+            }
+
+            // Clone balances for computation
+            let balances = {};
+            for (let name in group) balances[name] = round2(group[name].balance);
+
+            // Build bidirectional graph framework based on preferences
+            let graph = {};
+            for (let name in group) graph[name] = new Set();
+
+            for (let name in group) {
+                for (let friend of group[name].preferences) {
+                    if (graph[name]) graph[name].add(friend);
+                    if (graph[friend]) graph[friend].add(name); // Bidirectional transaction channels
+                }
+            }
+
+            let transactions = [];
+
+            // Shortest path to any available creditor via BFS
+            function findPathToCreditor(startDebtor) {
+                let queue = [[startDebtor]];
+                let visited = new Set([startDebtor]);
+
+                while (queue.length > 0) {
+                    let path = queue.shift();
+                    let current = path[path.length - 1];
+
+                    if (balances[current] > 0.01) {
+                        return path;
+                    }
+
+                    for (let neighbor of graph[current]) {
+                        if (!visited.has(neighbor)) {
+                            visited.add(neighbor);
+                            queue.push([...path, neighbor]);
+                        }
+                    }
+                }
+                return null;
+            }
+
+            // Loop and clear out debtors
+            let debtors = Object.keys(balances).filter(n => balances[n] < -0.01);
+            
+            // Check if total balances mathematically balance out to near zero
+            let totalSum = Object.values(balances).reduce((a,b)=> a+b, 0);
+            if (Math.abs(totalSum) > 2) {
+                alert(`Warning: Your total balances do not equal 0 (Sum is currently ${round2(totalSum)}). The algorithm will balance what it can.`);
+            }
+
+            for (let debtor of debtors) {
+                while (balances[debtor] < -0.01) {
+                    let path = findPathToCreditor(debtor);
+
+                    // If preferences cannot link them to a creditor, break out to a global fallback safety matching
+                    if (!path) {
+                        let outstandingCreditors = Object.keys(balances).filter(n => balances[n] > 0.01);
+                        if (outstandingCreditors.length === 0) break;
+                        path = [debtor, outstandingCreditors[0]]; // Fallback forced route if graph isolated
+                    }
+
+                    let creditor = path[path.length - 1];
+                    let amount = Math.min(Math.abs(balances[debtor]), balances[creditor]);
+                    amount = round2(amount);
+
+                    if (amount <= 0) break;
+
+                    // Apply transaction chain
+                    for (let i = 0; i < path.length - 1; i++) {
+                        transactions.push({ from: path[i], to: path[i+1], amount: amount });
+                    }
+
+                    balances[debtor] += amount;
+                    balances[creditor] -= amount;
+                }
+            }
+
+            renderResults(transactions);
+        }
+
+        function round2(num) {
+            return Math.round((num + Number.EPSILON) * 100) / 100;
+        }
+
+        function renderResults(transactions) {
+            const container = document.getElementById('resultsArea');
+            if (transactions.length === 0) {
+                container.innerHTML = `
+                    <div class="bg-emerald-50 text-emerald-800 p-4 rounded-lg border border-emerald-200 text-center font-medium">
+                        🎉 Everyone is perfectly squared away! No transactions needed.
+                    </div>`;
+                return;
+            }
+
+            container.innerHTML = transactions.map(t => `
+                <div class="bg-white p-3 rounded-lg border border-gray-200 shadow-sm flex items-center justify-between">
+                    <span class="font-medium text-gray-700">${t.from}</span>
+                    <div class="flex flex-col items-center flex-1 mx-2">
+                        <span class="text-xs text-indigo-600 font-bold bg-indigo-50 px-2 py-0.5 rounded-full">Pays $${t.amount.toFixed(2)}</span>
+                        <span class="text-gray-400 text-sm">➔</span>
+                    </div>
+                    <span class="font-medium text-gray-700">${t.to}</span>
+                </div>
+            `).join('');
+        }
+    </script>
+</body>
+</html>
